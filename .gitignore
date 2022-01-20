@@ -1,0 +1,12 @@
+# Ignore everything
+*
+
+# But not these files...
+!.gitignore
+!READEME.md
+!Offline 1
+!modifications.patch
+
+
+# ...even if they are in subdirectories
+!*/
