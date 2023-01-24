@@ -12,7 +12,7 @@
 #include "ns3/stats-module.h"
 #include "ns3/callback.h"
 #include "ns3/flow-monitor-module.h"
-
+#include "ns3/csma-module.h"
 
 using namespace ns3;
 
@@ -134,12 +134,6 @@ MyApp::SendPacket (void)
   Ptr<Packet> packet = Create<Packet> (m_packetSize);
   m_socket->Send (packet);
 
-  // if (++m_packetsSent < m_nPackets)
-  //   {
-  //     ScheduleTx ();
-  //   }
-
-  // takbir mod
   if(Simulator::Now().GetSeconds() < m_simultime) ScheduleTx();
 }
 
@@ -173,7 +167,7 @@ int main(int argc, char *argv[]){
     std::string output_folder = "taskB/tcphs";
     int simulationTimeInSeconds = 60;
     int cleanupTime = 2;
-    int bttlnkRate = 500;
+    int bttlnkRate = 50;
     int bttlnkDelay = 100;
     int packet_loss_exp = 6;
     int exp = 1;
@@ -193,7 +187,7 @@ int main(int argc, char *argv[]){
     double packet_loss_rate = (1.0 / std::pow(10, packet_loss_exp));
     std::string bottleNeckDataRate = std::to_string(bttlnkRate) + "Mbps";
     std::string bottleNeckDelay = std::to_string(bttlnkDelay) + "ms";
-    senderDataRate = std::to_string(bttlnkRate*4) + "Mbps";
+    // senderDataRate = std::to_string(bttlnkRate*4) + "Mbps";
 
     NS_LOG_UNCOND("USING TCP 1 = "<<tcpVariant1<<" ; TCP 2 = "<<tcpVariant2<<" ; nLeaf = "<<nLeaf<<
                   " ; bottleneck rate = "<<bottleNeckDataRate<<
@@ -210,10 +204,14 @@ int main(int argc, char *argv[]){
     // SETUP NODE AND DEVICE
     // Create the point-to-point link helpers
     PointToPointHelper bottleNeckLink;
+    // CsmaHelper bottleNeckLink;
+
     bottleNeckLink.SetDeviceAttribute  ("DataRate", StringValue (bottleNeckDataRate));
     bottleNeckLink.SetChannelAttribute ("Delay", StringValue (bottleNeckDelay));
 
+
     PointToPointHelper pointToPointLeaf;
+    // CsmaHelper pointToPointLeaf;
     pointToPointLeaf.SetDeviceAttribute  ("DataRate", StringValue (senderDataRate));
     pointToPointLeaf.SetChannelAttribute ("Delay", StringValue (senderDelay));
     // add router buffer capacity - equal to bandwidth delay product
@@ -227,9 +225,8 @@ int main(int argc, char *argv[]){
     // need device container but its private: made public graph becomes weird
     Ptr<RateErrorModel> em = CreateObject<RateErrorModel> ();
     em->SetAttribute ("ErrorRate", DoubleValue (packet_loss_rate));
-    // set receive error for bottleneck
+    // set receive error for bottleneck -> 0 dont work
     d.m_routerDevices.Get(1)->SetAttribute ("ReceiveErrorModel", PointerValue (em)); 
-    // d.m_routerDevices.Get(0)->SetAttribute ("ReceiveErrorModel", PointerValue (em)); 
 
     // for (uint32_t i = 0; i < d.LeftCount (); ++i)
     //   {
@@ -342,18 +339,20 @@ int main(int argc, char *argv[]){
       // NS_LOG_UNCOND("Packet lost diff way = "<< iter->second.lostPackets);
       NS_LOG_UNCOND("Delay = " <<iter->second.delaySum / iter->second.rxPackets);
       NS_LOG_UNCOND("Jitter = " <<iter->second.jitterSum);
-      NS_LOG_UNCOND("Throughput = " <<iter->second.rxBytes * 8.0/(iter->second.timeLastRxPacket.GetSeconds()-iter->second.timeFirstTxPacket.GetSeconds())/1024<<"Kbps");
+      // NS_LOG_UNCOND("Throughput = " <<iter->second.rxBytes * 8.0/((iter->second.timeLastRxPacket.GetSeconds()-iter->second.timeFirstTxPacket.GetSeconds())*1024)<<"Kbps");
+      NS_LOG_UNCOND("Throughput = " <<iter->second.rxBytes * 8.0/((simulationTimeInSeconds+cleanupTime)*1000)<<"Kbps");
     
-      CurThroughput = iter->second.rxBytes * 8.0/(iter->second.timeLastRxPacket.GetSeconds()-iter->second.timeFirstTxPacket.GetSeconds())/1024;
+
+      CurThroughput = iter->second.rxBytes * 8.0/((simulationTimeInSeconds+cleanupTime)*1000);
       // CurPacketLossRate = (iter->second.lostPackets)*100.0/iter->second.txPackets;
-      if(j%2 == 0) { CurThroughputArr[0] += CurThroughput; }
-      if(j%2 == 1) { CurThroughputArr[1] += CurThroughput; }
+      if(j%2 == 0) { CurThroughputArr[0] += iter->second.rxBytes; }
+      if(j%2 == 1) { CurThroughputArr[1] += iter->second.rxBytes; }
 
 
       SentPackets = SentPackets +(iter->second.txPackets);
       ReceivedPackets = ReceivedPackets + (iter->second.rxPackets);
       LostPackets = LostPackets + (iter->second.lostPackets);
-      AvgThroughput = AvgThroughput + CurThroughput;
+      // AvgThroughput = AvgThroughput + CurThroughput;
       j = j + 1;
 
       // https://en.wikipedia.org/wiki/Fairness_measure
@@ -361,14 +360,17 @@ int main(int argc, char *argv[]){
       jain_index_denominator += (CurThroughput * CurThroughput);
 
       // only want the src to dest throughput
-      if(j == nFlows) break;
+      // if(j == nFlows) break;
     }
 
-    double jain_index = (jain_index_numerator * jain_index_numerator) / ( nFlows * jain_index_denominator);
+    double jain_index = (jain_index_numerator * jain_index_numerator) / ( j * jain_index_denominator);
+    CurThroughputArr[0] /= ((simulationTimeInSeconds + cleanupTime)*1000);
+    CurThroughputArr[1] /= ((simulationTimeInSeconds + cleanupTime)*1000);
+    AvgThroughput = CurThroughputArr[0] + CurThroughputArr[1];
 
     // cols : bttlneck rate | random packet loss | throughput1 | throughput2 | jain_index
     MyFile << bottleNeckDataRate.substr(0, bottleNeckDataRate.length()-4) << " " << -1*packet_loss_exp << " " << CurThroughputArr[0] << " " << CurThroughputArr[1] << " " << " " << jain_index <<std::endl;
-
+    // friendliness https://icapeople.epfl.ch/widmer/files/Widmer2001a.pdf
 
     // AvgThroughput = AvgThroughput/j;
     NS_LOG_UNCOND("\n--------Total Results of the simulation----------"<<std::endl);

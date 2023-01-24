@@ -1,0 +1,48 @@
+# R0
+int f1/0
+ip address 192.168.10.1 255.255.255.0
+no shutdown
+
+int f4/0
+ip address 172.20.2.1 255.255.0.0
+no shutdown
+
+int f0/0
+ip address 172.10.1.1 255.255.0.0
+no shutdown
+
+router rip
+network 192.168.10.0
+network 172.20.0.0
+network 172.10.0.0
+
+# R1
+int f0/0
+ip address 172.10.1.2 255.255.0.0
+no shutdown
+
+int f4/0
+ip address 172.30.3.2 255.255.0.0
+no shutdown
+
+int f1/0
+ip address 192.168.20.1 255.255.255.0
+no shutdown
+
+router rip
+network 192.168.20.0
+network 172.10.0.0
+network 172.30.0.0
+
+# R2
+int f5/0
+ip address 172.20.2.2 255.255.0.0
+no shutdown
+
+int f4/0
+ip address 172.30.3.1 255.255.0.0
+no shutdown
+
+router rip
+network 172.20.0.0
+network 172.30.0.0

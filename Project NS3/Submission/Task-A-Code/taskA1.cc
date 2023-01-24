@@ -39,7 +39,7 @@ public:
    * \return The TypeId.
    */
   static TypeId GetTypeId (void);
-  void Setup (Ptr<Socket> socket, Address address, uint32_t packetSize, uint32_t nPackets, DataRate dataRate, uint32_t simultime);
+  void Setup (Ptr<Socket> socket, Address address, uint32_t packetSize, DataRate dataRate, uint32_t simultime);
 
 private:
   virtual void StartApplication (void);
@@ -51,7 +51,6 @@ private:
   Ptr<Socket>     m_socket;
   Address         m_peer;
   uint32_t        m_packetSize;
-  uint32_t        m_nPackets;
   DataRate        m_dataRate;
   EventId         m_sendEvent;
   bool            m_running;
@@ -63,7 +62,6 @@ MyApp::MyApp ()
   : m_socket (0),
     m_peer (),
     m_packetSize (0),
-    m_nPackets (0),
     m_dataRate (0),
     m_sendEvent (),
     m_running (false),
@@ -89,12 +87,11 @@ TypeId MyApp::GetTypeId (void)
 }
 
 void
-MyApp::Setup (Ptr<Socket> socket, Address address, uint32_t packetSize, uint32_t nPackets, DataRate dataRate, uint32_t simultime)
+MyApp::Setup (Ptr<Socket> socket, Address address, uint32_t packetSize, DataRate dataRate, uint32_t simultime)
 {
   m_socket = socket;
   m_peer = address;
   m_packetSize = packetSize;
-  m_nPackets = nPackets;
   m_dataRate = dataRate;
   m_simultime = simultime;
   // NS_LOG_UNCOND("Setting up :"<<socket<<"; address : "<<address<<" ; packetSize : "<<packetSize<<" ; nPackets : "<<nPackets<<" ; dataRate : "<<dataRate);
@@ -139,13 +136,8 @@ MyApp::SendPacket (void)
   Ptr<Packet> packet = Create<Packet> (m_packetSize);
   m_socket->Send (packet);
 
-  // if (++m_packetsSent < m_nPackets)
-  //   {
-  //     ScheduleTx ();
-  //   }
-
   // takbir mod
-  if(Simulator::Now().GetSeconds() < (m_simultime-5)) ScheduleTx();
+  if(Simulator::Now().GetSeconds() < m_simultime) ScheduleTx();
 }
 
 void
@@ -183,7 +175,6 @@ int main(int argc, char *argv[]){
     // std::string tcpVariant1 = "ns3::TcpCubic";
     // std::string tcpVariant2 = "ns3::TcpCubic";  // TcpNewReno
 
-    int totalPackets = 2000; //10000;
     int tx_range = 1;
     std::string bottleNeckDelay = "2ms";
     std::string output_folder = "taskA";
@@ -191,12 +182,14 @@ int main(int argc, char *argv[]){
 
 
     // changes for TASK A
-    int nNodes = 18;
+    int nNodes = 20;
     int nFlows = 20;
     int nPacketsPerSecond = 500;
     int coverageArea = 5;
 
     int simulationTimeInSeconds = 25;
+    int cleanupTime = 2;
+
 
     // input from CMD
     CommandLine cmd (__FILE__);
@@ -209,15 +202,15 @@ int main(int argc, char *argv[]){
     cmd.Parse (argc,argv);
     
     nFlows = nFlows/2; // considering ack flow as independent flow
-    int nLeaf = (nNodes - 2)/2; // minus 2 for ap nodes
-    int dataRate = (payloadSize * nPacketsPerSecond * 8) / 1024;
+    int nLeaf = nNodes/2; // minus 2 for ap nodes
+    int dataRate = (payloadSize * nPacketsPerSecond * 8) / 1000;
     coverageArea *= tx_range;
     // std::string senderDataRate = std::to_string(dataRate) + "Kbps";
     std::string senderDataRate = std::to_string(dataRate) + "Kbps";
     // std::string bottleNeckDataRate = std::to_string(dataRate / 10) + "Kbps";
     std::string bottleNeckDataRate = "1Mbps";
 
-    NS_LOG_UNCOND("Using nodes : "<<nNodes<<" ; flows : "<<nFlows<<" ; packets per sec : "<<nPacketsPerSecond<<" ; "\
+    NS_LOG_UNCOND("Using nodes : "<<nNodes<<" ; flows : "<<2*nFlows<<" ; packets per sec : "<<nPacketsPerSecond<<" ; "\
                   "coverage area : "<<coverageArea<<" ; sender data rate : "<<senderDataRate<<" ; bottleneck data rate : "<<bottleNeckDataRate);
     // srand(time(0));
 
@@ -231,15 +224,6 @@ int main(int argc, char *argv[]){
     NodeContainer p2pNodes;
     p2pNodes.Create(2);
 
-    // routers in p2p
-    PointToPointHelper pointToPoint;
-    pointToPoint.SetDeviceAttribute ("DataRate", StringValue (bottleNeckDataRate));
-    pointToPoint.SetChannelAttribute ("Delay", StringValue (bottleNeckDelay));
-
-    NetDeviceContainer pointToPointDevies;
-    pointToPointDevies = pointToPoint.Install(p2pNodes);
-
-
     // setup sender devices
     NodeContainer senderWifiStaNodes, receiverWifiStaNodes;
     NodeContainer senderWifiApNode = p2pNodes.Get(0);
@@ -252,6 +236,13 @@ int main(int argc, char *argv[]){
 
     /////////////////////// SETUP TOPOLOGY HELPERS ///////////////////////
     
+   // routers in p2p
+    PointToPointHelper pointToPoint;
+    pointToPoint.SetDeviceAttribute ("DataRate", StringValue (bottleNeckDataRate));
+    pointToPoint.SetChannelAttribute ("Delay", StringValue (bottleNeckDelay));
+
+    NetDeviceContainer pointToPointDevies;
+    pointToPointDevies = pointToPoint.Install(p2pNodes);
 
     
 
@@ -268,14 +259,6 @@ int main(int argc, char *argv[]){
     phy2.SetChannel (channel2.Create ());
 
 
-    // channel.AddPropagationLoss("ns3::RangePropagationLossModel","MaxRange", DoubleValue (coverageArea));
-    // channel2.AddPropagationLoss("ns3::RangePropagationLossModel","MaxRange", DoubleValue (coverageArea));
-
-
-    WifiMacHelper mac;
-    WifiMacHelper mac2;
-
-
     WifiHelper senderWifi;
     WifiHelper receiverWifi;
 
@@ -283,8 +266,11 @@ int main(int argc, char *argv[]){
 
     senderWifi.SetRemoteStationManager ("ns3::AarfWifiManager");
     receiverWifi.SetRemoteStationManager ("ns3::AarfWifiManager");
-    Ssid ssid = Ssid ("ns-3-ssid"); // 802.11
+    Ssid ssid = Ssid ("ns-3-ssid"); // this is 802.11
 
+
+    WifiMacHelper mac;
+    WifiMacHelper mac2;
 
     mac.SetType ("ns3::StaWifiMac",
                 "Ssid", SsidValue (ssid),
@@ -312,20 +298,7 @@ int main(int argc, char *argv[]){
     senderApDevices = senderWifi.Install (phy, mac, senderWifiApNode);
     receiverApDevices = receiverWifi.Install (phy2, mac2, receiverWifiApNode);
 
-    std::cout << "NodeCount: " << ns3::NodeList::GetNNodes() << std::endl;
     
-    // receivers in wifi
-    // channel2.AddPropagationLoss("ns3::RangePropagationLossModel","MaxRange", DoubleValue (coverageArea));
-
-
-    
-    
-    // receiver nodes
-
-    
-
-    // receiver ap    
-
     // error model
     // Ptr<RateErrorModel> em = CreateObject<RateErrorModel> ();
     // em->SetAttribute("ErrorRate", DoubleValue (0.000001));
@@ -361,12 +334,12 @@ int main(int argc, char *argv[]){
     mobility.Install(receiverWifiApNode);
 
     // iterate our nodes and print their position.
-    // GetPosition(senderWifiStaNodes);
-    // NS_LOG_UNCOND("AP -> ");
-    // GetPosition(senderWifiApNode);
-    // GetPosition(receiverWifiStaNodes);
-    // NS_LOG_UNCOND("AP -> ");
-    // GetPosition(receiverWifiApNode);
+    GetPosition(senderWifiStaNodes);
+    NS_LOG_UNCOND("AP -> ");
+    GetPosition(senderWifiApNode);
+    GetPosition(receiverWifiStaNodes);
+    NS_LOG_UNCOND("AP -> ");
+    GetPosition(receiverWifiApNode);
 
     ///////  ROUTING STUFF
     // https://www.nsnam.org/docs/release/3.14/models/html/routing-overview.html
@@ -383,17 +356,6 @@ int main(int argc, char *argv[]){
     // tcp variant 1
     // Config::SetDefault ("ns3::TcpL4Protocol::SocketType", StringValue (tcpVariant1));
     InternetStackHelper stack1;
-    // stack1.SetRoutingHelper (list);
-    // for (int32_t i = 0; i < nLeaf; i+=1)
-    //   {
-    //     stack1.Install (senderWifiStaNodes.Get (i)); // left leaves
-    //   }
-    // for (int32_t i = 0; i < nLeaf; i+=1)
-    //   {
-    //     stack1.Install (receiverWifiStaNodes.Get (i)); // right leaves
-    //   }
-    // stack1.Install (p2pNode.Get (0));
-    // stack1.Install (p2pNode.Get (1));
     stack1.Install(receiverWifiApNode);
     stack1.Install(senderWifiApNode);
 
@@ -429,7 +391,6 @@ int main(int argc, char *argv[]){
     //   Ptr<Ipv4StaticRouting> sr = Ipv4RoutingHelper::GetRouting<Ipv4StaticRouting> ((*itr)->GetObject<Ipv4>()->GetRoutingProtocol());
     //   sr->SetDefaultRoute(senderApInterface.GetAddress(0), 1);
     // }
-
     
 
     /////////////////////// SETUP SOURCE AND SINK ///////////////////////
@@ -445,11 +406,11 @@ int main(int argc, char *argv[]){
       PacketSinkHelper packetSinkHelper ("ns3::TcpSocketFactory", InetSocketAddress (Ipv4Address::GetAny(), sp)); // 0.0.0.0 address 
       ApplicationContainer sinkApps = packetSinkHelper.Install (receiverWifiStaNodes.Get (receiver_no));
       sinkApps.Start (Seconds (0.));
-      sinkApps.Stop (Seconds (simulationTimeInSeconds + 3));
+      sinkApps.Stop (Seconds (simulationTimeInSeconds + cleanupTime));
 
       Ptr<Socket> ns3TcpSocket = Socket::CreateSocket (senderWifiStaNodes.Get (sender_no), TcpSocketFactory::GetTypeId ());
       Ptr<MyApp> app = CreateObject<MyApp> ();
-      app->Setup (ns3TcpSocket, InetSocketAddress (receiverStaInterfaces.GetAddress(receiver_no), sp), payloadSize, totalPackets, DataRate (senderDataRate), simulationTimeInSeconds);
+      app->Setup (ns3TcpSocket, InetSocketAddress (receiverStaInterfaces.GetAddress(receiver_no), sp), payloadSize, DataRate (senderDataRate), simulationTimeInSeconds);
       senderWifiApNode.Get (0)->AddApplication (app);
       app->SetStartTime (Seconds (1.));
       app->SetStopTime (Seconds (simulationTimeInSeconds));
@@ -468,10 +429,10 @@ int main(int argc, char *argv[]){
     Ipv4GlobalRoutingHelper::PopulateRoutingTables ();
     // install flow monitor
     FlowMonitorHelper flowmon;
+    flowmon.SetMonitorAttribute("MaxPerHopDelay", TimeValue(Seconds(cleanupTime)));
     Ptr<FlowMonitor> monitor = flowmon.InstallAll ();
 
-
-    Simulator::Stop (Seconds (simulationTimeInSeconds + 3));
+    Simulator::Stop (Seconds (simulationTimeInSeconds + cleanupTime));
     Simulator::Run ();
     
     /////////////////////// FLOW MONITOR STATUS ///////////////////////
@@ -481,6 +442,7 @@ int main(int argc, char *argv[]){
     Time Delay;
     uint32_t SentPackets = 0;
     uint32_t ReceivedPackets = 0;
+    uint32_t ReceivedBytes = 0;
     uint32_t LostPackets = 0;
 
     std::ofstream MyFile(file, std::ios_base::app);
@@ -491,7 +453,7 @@ int main(int argc, char *argv[]){
     int j=0;
     for (auto iter = stats.begin (); iter != stats.end (); ++iter) {
       Ipv4FlowClassifier::FiveTuple t = classifier->FindFlow (iter->first); 
-            // classifier returns FiveTuple in correspondance to a flowID
+      // classifier returns FiveTuple in correspondance to a flowID
 
       NS_LOG_UNCOND("----Flow ID:" <<iter->first);
       NS_LOG_UNCOND("Src Addr" <<t.sourceAddress << " -- Dst Addr "<< t.destinationAddress);
@@ -501,18 +463,21 @@ int main(int argc, char *argv[]){
       NS_LOG_UNCOND("Packet delivery ratio = " <<iter->second.rxPackets*100.0/iter->second.txPackets << "%");
       NS_LOG_UNCOND("Packet loss ratio = " << (iter->second.lostPackets)*100.0/iter->second.txPackets << "%");
       NS_LOG_UNCOND("Packet lost diff way = "<< iter->second.lostPackets);
-      NS_LOG_UNCOND("Delay = " <<iter->second.delaySum / iter->second.rxPackets);
-      NS_LOG_UNCOND("Throughput = " <<iter->second.rxBytes * 8.0/(iter->second.timeLastRxPacket.GetSeconds()-iter->second.timeFirstTxPacket.GetSeconds())/1024<<"Kbps");
+      if(iter->second.rxPackets != 0) NS_LOG_UNCOND("Delay = " <<iter->second.delaySum / iter->second.rxPackets);
+      // NS_LOG_UNCOND("Throughput = " <<iter->second.rxBytes * 8.0/(iter->second.timeLastRxPacket.GetSeconds()-iter->second.timeFirstTxPacket.GetSeconds())/1024<<"Kbps");
+      NS_LOG_UNCOND("Throughput = " <<iter->second.rxBytes * 8.0/((simulationTimeInSeconds+cleanupTime)*1000)<<"Kbps");
       NS_LOG_UNCOND(" ");
       SentPackets = SentPackets +(iter->second.txPackets);
       ReceivedPackets = ReceivedPackets + (iter->second.rxPackets);
+      ReceivedBytes = ReceivedBytes + (iter->second.rxBytes);
       LostPackets = LostPackets + (iter->second.lostPackets);
-      AvgThroughput = AvgThroughput + (iter->second.rxBytes * 8.0/(iter->second.timeLastRxPacket.GetSeconds()-iter->second.timeFirstTxPacket.GetSeconds())/1024);
       Delay = Delay + (iter->second.delaySum);
 
       j += 1;
     }
 
+    
+    AvgThroughput = ReceivedBytes*8.0 / ((simulationTimeInSeconds + cleanupTime)*1000);
     // AvgThroughput = AvgThroughput/(2*nFlows);
     NS_LOG_UNCOND("\n--------Total Results of the simulation----------"<<std::endl);
     NS_LOG_UNCOND("Total sent packets  = " << SentPackets);
@@ -520,19 +485,19 @@ int main(int argc, char *argv[]){
     NS_LOG_UNCOND("Total Lost Packets = " << LostPackets);
     NS_LOG_UNCOND("METRICS >> ");
     NS_LOG_UNCOND("Average Throughput = " << AvgThroughput<< "Kbps");
-    NS_LOG_UNCOND("End to End Delay = " << Delay/ReceivedPackets);
+    if(ReceivedPackets != 0) NS_LOG_UNCOND("End to End Delay = " << Delay/ReceivedPackets);
     NS_LOG_UNCOND("Packet Delivery Ratio = " << ((ReceivedPackets*100.00)/SentPackets)<< "%");
     NS_LOG_UNCOND("Packet Drop Ratio = " << ((LostPackets*100.00)/SentPackets)<< "%");
     NS_LOG_UNCOND("Total Flows " << j);
-
+    NS_LOG_UNCOND("#######################################################################\n\n");
 
 
     // first x axes
-    MyFile << nNodes << " " << nFlows << " " << nPacketsPerSecond << " " << coverageArea  << " ";
+    MyFile << nNodes << " " << 2*nFlows << " " << nPacketsPerSecond << " " << coverageArea  << " ";
     // then y values
     MyFile << AvgThroughput << " " << Delay/ReceivedPackets << " " << ((ReceivedPackets*100.00)/SentPackets) << " " << ((LostPackets*100.00)/SentPackets) <<std::endl;
 
-    MyFile.close(); // TODO check this in task B files
+    MyFile.close();
 
     Simulator::Destroy ();
 

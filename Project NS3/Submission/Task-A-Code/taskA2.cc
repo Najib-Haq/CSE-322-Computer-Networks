@@ -35,7 +35,7 @@ public:
    * \return The TypeId.
    */
   static TypeId GetTypeId (void);
-  void Setup (Ptr<Socket> socket, Address address, uint32_t packetSize, uint32_t nPackets, DataRate dataRate, uint32_t simultime);
+  void Setup (Ptr<Socket> socket, Address address, uint32_t packetSize, DataRate dataRate, uint32_t simultime);
 
 private:
   virtual void StartApplication (void);
@@ -47,7 +47,6 @@ private:
   Ptr<Socket>     m_socket;
   Address         m_peer;
   uint32_t        m_packetSize;
-  uint32_t        m_nPackets;
   DataRate        m_dataRate;
   EventId         m_sendEvent;
   bool            m_running;
@@ -59,7 +58,6 @@ MyApp::MyApp ()
   : m_socket (0),
     m_peer (),
     m_packetSize (0),
-    m_nPackets (0),
     m_dataRate (0),
     m_sendEvent (),
     m_running (false),
@@ -85,12 +83,11 @@ TypeId MyApp::GetTypeId (void)
 }
 
 void
-MyApp::Setup (Ptr<Socket> socket, Address address, uint32_t packetSize, uint32_t nPackets, DataRate dataRate, uint32_t simultime)
+MyApp::Setup (Ptr<Socket> socket, Address address, uint32_t packetSize, DataRate dataRate, uint32_t simultime)
 {
   m_socket = socket;
   m_peer = address;
   m_packetSize = packetSize;
-  m_nPackets = nPackets;
   m_dataRate = dataRate;
   m_simultime = simultime;
   // NS_LOG_UNCOND("Setting up :"<<socket<<"; address : "<<address<<" ; packetSize : "<<packetSize<<" ; nPackets : "<<nPackets<<" ; dataRate : "<<dataRate);
@@ -135,13 +132,8 @@ MyApp::SendPacket (void)
   Ptr<Packet> packet = Create<Packet> (m_packetSize);
   m_socket->Send (packet);
 
-  // if (++m_packetsSent < m_nPackets)
-  //   {
-  //     ScheduleTx ();
-  //   }  
-
   // takbir mod
-  if(Simulator::Now().GetSeconds() < (m_simultime-5)) ScheduleTx();
+  if(Simulator::Now().GetSeconds() < m_simultime) ScheduleTx();
 }
 
 void
@@ -150,6 +142,7 @@ MyApp::ScheduleTx (void)
   if (m_running)
     {
       Time tNext (Seconds (m_packetSize * 8 / static_cast<double> (m_dataRate.GetBitRate ())));
+      // NS_LOG_UNCOND("Time is "<<tNext.GetSeconds());
       m_sendEvent = Simulator::Schedule (tNext, &MyApp::SendPacket, this);
     }
 }
@@ -175,17 +168,7 @@ void GetPosition(NodeContainer container){
 }
 
 int main(int argc, char *argv[]){
-    uint32_t payloadSize = 20;
-    // TODO: check this. this is new payloadsize
-    // uint32_t mtu_bytes = 20;
-    // Header* temp_header = new Ipv6Header ();
-    // uint32_t ip_header = temp_header->GetSerializedSize ();
-    // delete temp_header;
-    // temp_header = new TcpHeader ();
-    // uint32_t tcp_header = temp_header->GetSerializedSize ();
-    // delete temp_header;
-    // uint32_t tcp_adu_size = mtu_bytes - 20 - (ip_header + tcp_header);
-    // uint32_t payloadSize = tcp_adu_size; // application data unit/ contains protocol data unit
+    uint32_t payloadSize = 100;
 
     Config::SetDefault ("ns3::TcpSocket::SegmentSize", UintegerValue (payloadSize));
 
@@ -193,7 +176,6 @@ int main(int argc, char *argv[]){
     // std::string tcpVariant1 = "ns3::TcpCubic";
     // std::string tcpVariant2 = "ns3::TcpCubic";  // TcpNewReno
 
-    int totalPackets = 2000; //10000;
     int tx_range = 1;
     std::string bottleNeckDelay = "1ms";
     std::string output_folder = "taskA";
@@ -201,12 +183,14 @@ int main(int argc, char *argv[]){
 
 
     // changes for TASK A
-    int nNodes = 18;
+    int nNodes = 20;
     int nFlows = 20;
     int nPacketsPerSecond = 500;
-    int coverageArea = 10;
+    int coverageArea = 5;
 
     int simulationTimeInSeconds = 60;
+    int cleanupTime = 2;
+
 
     // input from CMD
     CommandLine cmd (__FILE__);
@@ -219,8 +203,8 @@ int main(int argc, char *argv[]){
     cmd.Parse (argc,argv);
     
     nFlows = nFlows/2; // considering ack flow as independent flow
-    int nLeaf = (nNodes - 2)/2; // minus 2 for ap nodes
-    int dataRate = (payloadSize * nPacketsPerSecond * 8) / 1024;
+    int nLeaf = nNodes/2; // minus 2 for ap nodes
+    int dataRate = (payloadSize * nPacketsPerSecond * 8) / 1000;
     coverageArea *= tx_range;
     // std::string senderDataRate = std::to_string(dataRate) + "Kbps";
     std::string senderDataRate = std::to_string(dataRate) + "Kbps";
@@ -270,8 +254,8 @@ int main(int argc, char *argv[]){
     mobility.SetPositionAllocator ("ns3::GridPositionAllocator",
                                  "MinX", DoubleValue (0.0),
                                  "MinY", DoubleValue (0.0),
-                                 "DeltaX", DoubleValue (10.0),
-                                 "DeltaY", DoubleValue (10.0),
+                                 "DeltaX", DoubleValue (tx_range),
+                                 "DeltaY", DoubleValue (tx_range),
                                  "GridWidth", UintegerValue (3),
                                  "LayoutType", StringValue ("RowFirst"));
 
@@ -296,34 +280,28 @@ int main(int argc, char *argv[]){
     Ptr<SingleModelSpectrumChannel> leftChannel = CreateObject<SingleModelSpectrumChannel> ();
     Ptr<RangePropagationLossModel> leftproplossModel = CreateObject<RangePropagationLossModel> ();
     Ptr<ConstantSpeedPropagationDelayModel> leftdelayModel = CreateObject<ConstantSpeedPropagationDelayModel> ();
+    // leftdelayModel->SetSpeed(leftdelayModel->GetSpeed()*dataRate);
+    // leftdelayModel->SetSpeed(dataRate);
     leftChannel->AddPropagationLossModel (leftproplossModel); 
-    // // receiverWpanH.GetChannel ()->AddPropagationLossModel (proplossModel);
-    // // TODO: is this needed
     leftChannel->SetPropagationDelayModel (leftdelayModel);
-    // // receiverWpanH.GetChannel ()->SetPropagationDelayModel (delayModel); 
 
     // senders in wifi
     Ptr<SingleModelSpectrumChannel> rightChannel = CreateObject<SingleModelSpectrumChannel> ();
     Ptr<RangePropagationLossModel> rightproplossModel = CreateObject<RangePropagationLossModel> ();
     Ptr<ConstantSpeedPropagationDelayModel> rightdelayModel = CreateObject<ConstantSpeedPropagationDelayModel> ();
+    // rightdelayModel->SetSpeed(rightdelayModel->GetSpeed()*dataRate);
     rightChannel->AddPropagationLossModel (rightproplossModel); 
-    // // receiverWpanH.GetChannel ()->AddPropagationLossModel (proplossModel);
-    // // TODO: is this needed
     rightChannel->SetPropagationDelayModel (rightdelayModel);
 
     LrWpanHelper senderWpanH, receiverWpanH;
     senderWpanH.SetChannel(leftChannel);
     receiverWpanH.SetChannel(rightChannel);
-    
 
     NetDeviceContainer senderDevices = senderWpanH.Install (senderNodes);
     NetDeviceContainer receiverDevices = receiverWpanH.Install (receiverNodes);
     
     senderWpanH.AssociateToPan (senderDevices, 0); // 2nd argument is pan-id, associates all devices to this pan 
     receiverWpanH.AssociateToPan (receiverDevices, 1); 
-    // Config::Set("/NodeList/2/DeviceList/0/$ns3::LrWpanNetDevice/Channel/PropagationLossModel/$ns3::RangePropagationLossModel::MaxRange", DoubleValue(coverageArea)); 
-
-
 
     // iterate our nodes and print their position.
     // GetPosition(senderWifiStaNodes);
@@ -349,7 +327,6 @@ int main(int argc, char *argv[]){
     address.SetBase (Ipv6Address ("2001:aaaa::"), Ipv6Prefix (64));
     Ipv6InterfaceContainer p2pInterface = address.Assign (pointToPointDevice);
     
-    // TODO : check this
     p2pInterface.SetForwarding (1, true);
     p2pInterface.SetDefaultRouteInAllNodes (1);
     p2pInterface.SetForwarding (0, true);
@@ -375,7 +352,7 @@ int main(int argc, char *argv[]){
     for (uint32_t i = 0; i < receiverSixDevices.GetN (); i++) {
       Ptr<NetDevice> dev = receiverSixDevices.Get (i);
       dev->SetAttribute ("UseMeshUnder", BooleanValue (true));
-      dev->SetAttribute ("MeshUnderRadius", UintegerValue (10));
+      dev->SetAttribute ("MeshUnderRadius", UintegerValue (tx_range));
     }
 
     /////////////////////// SETUP SOURCE AND SINK ///////////////////////
@@ -393,11 +370,11 @@ int main(int argc, char *argv[]){
       // packetSinkHelper.SetAttribute ("Protocol", TypeIdValue (TcpSocketFactory::GetTypeId ()));
       ApplicationContainer sinkApps = packetSinkHelper.Install (receiverNodes.Get (receiver_no + 1)); // + 1 as 2 nodes are in p2p
       sinkApps.Start (Seconds (0.));
-      sinkApps.Stop (Seconds (simulationTimeInSeconds + 3));
+      sinkApps.Stop (Seconds (simulationTimeInSeconds + cleanupTime));
 
       Ptr<Socket> ns3TcpSocket = Socket::CreateSocket (senderNodes.Get (sender_no + 1), TcpSocketFactory::GetTypeId ());
       Ptr<MyApp> app = CreateObject<MyApp> ();
-      app->Setup (ns3TcpSocket, Inet6SocketAddress (receiverIpInterface.GetAddress(receiver_no + 1, 1), sp), payloadSize, totalPackets, DataRate (senderDataRate), simulationTimeInSeconds);
+      app->Setup (ns3TcpSocket, Inet6SocketAddress (receiverIpInterface.GetAddress(receiver_no + 1, 1), sp), payloadSize, DataRate (senderDataRate), simulationTimeInSeconds);
       senderNodes.Get (0)->AddApplication (app);
       app->SetStartTime (Seconds (1.));
       app->SetStopTime (Seconds (simulationTimeInSeconds));
@@ -418,10 +395,11 @@ int main(int argc, char *argv[]){
     // Ipv4GlobalRoutingHelper::PopulateRoutingTables ();
     // install flow monitor
     FlowMonitorHelper flowmon;
+    flowmon.SetMonitorAttribute("MaxPerHopDelay", TimeValue(Seconds(cleanupTime)));
     Ptr<FlowMonitor> monitor = flowmon.InstallAll ();
 
 
-    Simulator::Stop (Seconds (simulationTimeInSeconds + 3));
+    Simulator::Stop (Seconds (simulationTimeInSeconds + cleanupTime));
     Simulator::Run ();
     
     /////////////////////// FLOW MONITOR STATUS ///////////////////////
@@ -431,6 +409,7 @@ int main(int argc, char *argv[]){
     Time Delay;
     uint32_t SentPackets = 0;
     uint32_t ReceivedPackets = 0;
+    uint32_t ReceivedBytes = 0;
     uint32_t LostPackets = 0;
 
     std::ofstream MyFile(file, std::ios_base::app);
@@ -441,44 +420,48 @@ int main(int argc, char *argv[]){
     int j=0;
     for (auto iter = stats.begin (); iter != stats.end (); ++iter) {
       Ipv6FlowClassifier::FiveTuple t = classifier->FindFlow (iter->first); 
-            // classifier returns FiveTuple in correspondance to a flowID
+      // classifier returns FiveTuple in correspondance to a flowID
 
       NS_LOG_UNCOND("----Flow ID:" <<iter->first);
       NS_LOG_UNCOND("Src Addr" <<t.sourceAddress << " -- Dst Addr "<< t.destinationAddress);
       NS_LOG_UNCOND("Sent Packets = " <<iter->second.txPackets);
       NS_LOG_UNCOND("Received Packets = " <<iter->second.rxPackets);
-      NS_LOG_UNCOND("Lost Packets = " <<iter->second.txPackets-iter->second.rxPackets);
+      NS_LOG_UNCOND("Lost Packets = " <<iter->second.lostPackets);
       NS_LOG_UNCOND("Packet delivery ratio = " <<iter->second.rxPackets*100.0/iter->second.txPackets << "%");
-      NS_LOG_UNCOND("Packet loss ratio = " << (iter->second.txPackets-iter->second.rxPackets)*100.0/iter->second.txPackets << "%");
+      NS_LOG_UNCOND("Packet loss ratio = " << (iter->second.lostPackets)*100.0/iter->second.txPackets << "%");
       NS_LOG_UNCOND("Packet lost diff way = "<< iter->second.lostPackets);
-      NS_LOG_UNCOND("Delay = " <<iter->second.delaySum);
-      NS_LOG_UNCOND("Throughput = " <<iter->second.rxBytes * 8.0/(iter->second.timeLastRxPacket.GetSeconds()-iter->second.timeFirstTxPacket.GetSeconds())/1024<<"Kbps");
+      if(iter->second.rxPackets != 0) NS_LOG_UNCOND("Delay = " <<iter->second.delaySum / iter->second.rxPackets);
+      // NS_LOG_UNCOND("Throughput = " <<iter->second.rxBytes * 8.0/(iter->second.timeLastRxPacket.GetSeconds()-iter->second.timeFirstTxPacket.GetSeconds())/1024<<"Kbps");
+      NS_LOG_UNCOND("Throughput = " <<iter->second.rxBytes * 8.0/((simulationTimeInSeconds+cleanupTime)*1000)<<"Kbps");
       NS_LOG_UNCOND(" ");
       SentPackets = SentPackets +(iter->second.txPackets);
       ReceivedPackets = ReceivedPackets + (iter->second.rxPackets);
-      LostPackets = LostPackets + (iter->second.txPackets-iter->second.rxPackets);
-      AvgThroughput = AvgThroughput + (iter->second.rxBytes * 8.0/(iter->second.timeLastRxPacket.GetSeconds()-iter->second.timeFirstTxPacket.GetSeconds())/1024);
+      ReceivedBytes = ReceivedBytes + (iter->second.rxBytes);
+      LostPackets = LostPackets + (iter->second.lostPackets);
       Delay = Delay + (iter->second.delaySum);
 
       j += 1;
     }
 
-    AvgThroughput = AvgThroughput/(2*nFlows);
+    AvgThroughput = ReceivedBytes*8.0 / ((simulationTimeInSeconds + cleanupTime)*1000);
+    // AvgThroughput = AvgThroughput/(2*nFlows);
     NS_LOG_UNCOND("\n--------Total Results of the simulation----------"<<std::endl);
     NS_LOG_UNCOND("Total sent packets  = " << SentPackets);
     NS_LOG_UNCOND("Total Received Packets = " << ReceivedPackets);
     NS_LOG_UNCOND("Total Lost Packets = " << LostPackets);
     NS_LOG_UNCOND("METRICS >> ");
     NS_LOG_UNCOND("Average Throughput = " << AvgThroughput<< "Kbps");
-    NS_LOG_UNCOND("End to End Delay = " << Delay/ReceivedPackets);
+    if(ReceivedPackets != 0) NS_LOG_UNCOND("End to End Delay = " << Delay/ReceivedPackets);
     NS_LOG_UNCOND("Packet Delivery Ratio = " << ((ReceivedPackets*100.00)/SentPackets)<< "%");
     NS_LOG_UNCOND("Packet Drop Ratio = " << ((LostPackets*100.00)/SentPackets)<< "%");
     NS_LOG_UNCOND("Total Flows " << j);
+    NS_LOG_UNCOND("#######################################################################\n\n");
+
 
 
 
     // first x axes
-    MyFile << nNodes << " " << nFlows << " " << nPacketsPerSecond << " " << coverageArea  << " ";
+    MyFile << nNodes << " " << 2*nFlows << " " << nPacketsPerSecond << " " << coverageArea  << " ";
     // then y values
     MyFile << AvgThroughput << " " << Delay/ReceivedPackets << " " << ((ReceivedPackets*100.00)/SentPackets) << " " << ((LostPackets*100.00)/SentPackets) <<std::endl;
 
